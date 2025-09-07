@@ -55,50 +55,87 @@
     <div class="playlist" id="playlist"></div>
     <button id="newPageBtn">＋ New Page</button>
 
-    <!-- ... rest of UI unchanged ... -->
+    <div class="panel">
+      <div class="drop" id="dropZone">Drop audio file here or click to select<input type="file" id="fileInput" accept="audio/*" /></div>
+      <div class="controls">
+        <button id="playBtn">▶︎</button>
+        <button id="pauseBtn">❚❚</button>
+        <button id="stopBtn">⏹ Restart</button>
+        <span class="time" id="timeDisplay">00:00.000</span>
+      </div>
+      <canvas id="waveform"></canvas>
+      <div class="controls">
+        <button id="addCueBtn">＋ Cue</button>
+      </div>
+      <div class="cue-list">
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Note</th><th>Actions</th></tr>
+          </thead>
+          <tbody id="cueTableBody"></tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
   <audio id="audioEl" crossorigin="anonymous" hidden></audio>
 
   <script>
-    // ... all your existing JS up to renderPages ...
+    const playlistEl=document.getElementById('playlist');
+    const newPageBtn=document.getElementById('newPageBtn');
+    const audioEl=document.getElementById('audioEl');
+    const playBtn=document.getElementById('playBtn');
+    const pauseBtn=document.getElementById('pauseBtn');
+    const stopBtn=document.getElementById('stopBtn');
+    const timeDisplay=document.getElementById('timeDisplay');
+    const waveform=document.getElementById('waveform');
+    const cueTableBody=document.getElementById('cueTableBody');
+
+    let pages=[];let currentPage=0;
+
+    function addPage(name="Page", color="#333"){
+      pages.push({name, color, cues: []});
+      currentPage=pages.length-1;
+      renderPages();
+      loadPage();
+    }
+
+    newPageBtn.addEventListener('click',()=>addPage("Page "+(pages.length+1)));
 
     function renderPages(){
-      playlistEl.innerHTML = '';
+      playlistEl.innerHTML='';
       pages.forEach((p,i)=>{
-        const btn = document.createElement('div');
-        btn.className = 'page-btn';
-        btn.style.background = p.color || '#333';
+        const btn=document.createElement('div');
+        btn.className='page-btn';
+        btn.style.background=p.color||'#333';
 
-        const label = document.createElement('span');
-        label.textContent = p.name;
-        label.className = 'page-label';
+        const label=document.createElement('span');
+        label.textContent=p.name;
+        label.className='page-label';
 
-        // click to load page when clicking anywhere except label double-click or remove
-        btn.addEventListener('click', ()=>{ currentPage = i; loadPage(); });
+        btn.addEventListener('click',()=>{currentPage=i;loadPage();});
 
-        // double-click ONLY on the label to rename
-        label.addEventListener('dblclick', (ev)=>{
+        label.addEventListener('dblclick',(ev)=>{
           ev.stopPropagation();
-          const input = document.createElement('input');
-          input.value = p.name;
-          input.className = 'rename-input';
-          btn.innerHTML = '';
+          const input=document.createElement('input');
+          input.value=p.name;
+          input.className='rename-input';
+          btn.innerHTML='';
           btn.appendChild(input);
           input.focus();
           input.select();
-          input.addEventListener('blur', ()=>{ p.name = input.value || p.name; renderPages(); });
-          input.addEventListener('keydown', (ev)=>{ if(ev.key === 'Enter'){ p.name = input.value || p.name; renderPages(); } });
+          input.addEventListener('blur',()=>{p.name=input.value||p.name;renderPages();});
+          input.addEventListener('keydown',(ev)=>{if(ev.key==='Enter'){p.name=input.value||p.name;renderPages();}});
         });
 
-        const rm = document.createElement('button');
-        rm.textContent = '✕';
-        rm.className = 'remove-btn';
-        rm.addEventListener('click', (ev)=>{
+        const rm=document.createElement('button');
+        rm.textContent='✕';
+        rm.className='remove-btn';
+        rm.addEventListener('click',(ev)=>{
           ev.stopPropagation();
           if(confirm('Remove page "'+p.name+'"?')){
             pages.splice(i,1);
-            if(currentPage >= pages.length) currentPage = Math.max(0,pages.length-1);
+            if(currentPage>=pages.length)currentPage=Math.max(0,pages.length-1);
             renderPages();
             loadPage();
           }
@@ -110,7 +147,36 @@
       });
     }
 
-    // ... rest of your JS unchanged ...
+    function loadPage(){
+      console.log("Loaded page",pages[currentPage]?.name);
+      cueTableBody.innerHTML='';
+      if(!pages[currentPage])return;
+      pages[currentPage].cues.forEach((cue,j)=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML='<td>'+cue.time+'</td><td>'+cue.note+'</td><td><button data-i="'+j+'">Delete</button></td>';
+        tr.querySelector('button').addEventListener('click',()=>{
+          pages[currentPage].cues.splice(j,1);
+          loadPage();
+        });
+        cueTableBody.appendChild(tr);
+      });
+    }
+
+    // Basic audio controls
+    playBtn.addEventListener('click',()=>audioEl.play());
+    pauseBtn.addEventListener('click',()=>audioEl.pause());
+    stopBtn.addEventListener('click',()=>{if(isFinite(audioEl.duration)){audioEl.currentTime=0;}audioEl.pause();});
+
+    audioEl.addEventListener('timeupdate',()=>{
+      const t=audioEl.currentTime;
+      const ms=(t%1).toFixed(3).substring(2);
+      const s=('0'+Math.floor(t%60)).slice(-2);
+      const m=('0'+Math.floor(t/60)).slice(-2);
+      timeDisplay.textContent=`${m}:${s}.${ms}`;
+    });
+
+    // Initialize
+    addPage("Page 1");
   </script>
 </body>
 </html>
