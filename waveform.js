@@ -1,58 +1,73 @@
-// waveform.js
 const canvas = document.getElementById('waveform');
 const ctx = canvas.getContext('2d');
+const cueBanner = document.getElementById('cueBanner');
 let waveformData = [];
-let markerPositions = [];
+
+function initWaveform(){
+    if(!audioEl.src) return;
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const reader = new FileReader();
+
+    fetch(audioEl.src)
+        .then(res => res.arrayBuffer())
+        .then(buf => audioCtx.decodeAudioData(buf))
+        .then(decoded => {
+            waveformData = decoded.getChannelData(0);
+            drawWaveform();
+        });
+}
 
 function drawWaveform(){
-  const width = canvas.width;
-  const height = canvas.height;
-  ctx.clearRect(0, 0, width, height);
+    if(!canvas || !waveformData.length) return;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    const w = canvas.width;
+    const h = canvas.height;
+    const step = Math.ceil(waveformData.length / w);
 
-  if(!waveformData.length) return;
+    for(let i=0; i<w; i++){
+        const min = waveformData[i*step];
+        const y = (1 + min) * 0.5 * h;
+        ctx.fillStyle = '#5b8cff';
+        ctx.fillRect(i, h/2, 1, y - h/2);
+    }
 
-  ctx.fillStyle = '#5b8cff';
-  waveformData.forEach((v, i) => {
-    const x = i / waveformData.length * width;
-    const y = (v * 0.5 + 0.5) * height;
-    ctx.fillRect(x, height/2 - y/2, 1, y);
-  });
-
-  // draw markers
-  markerPositions.forEach(marker => {
-    ctx.fillStyle = marker.color || '#22c55e';
-    const x = marker.timeRatio * width;
-    ctx.fillRect(x-2, 0, 4, height);
-  });
+    // Draw cue markers
+    if(pages[currentPage]){
+        pages[currentPage].cues.forEach(cue=>{
+            const [m,sms] = cue.time.split(':');
+            const [s,ms] = sms.split('.');
+            const tSec = parseInt(m)*60 + parseInt(s) + parseInt(ms)/1000;
+            const x = (tSec / audioEl.duration) * w;
+            ctx.fillStyle = cue.color;
+            ctx.fillRect(x,0,2,h);
+        });
+    }
 }
 
-function updateMarkers(){
-  if(!pages[currentPage]) return;
-  markerPositions = pages[currentPage].cues.map(cue => {
-    const [m,sms] = cue.time.split(':');
-    const [s, ms] = sms.split('.');
-    const cueTime = parseInt(m)*60 + parseInt(s) + parseInt(ms)/1000;
-    const ratio = audioEl.duration ? cueTime / audioEl.duration : 0;
-    return {timeRatio: ratio, color: cue.color, name: cue.name};
-  });
-  drawWaveform();
-}
+// Hover cue banner
+canvas.addEventListener('mousemove', e=>{
+    if(!pages[currentPage]) return;
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const w = canvas.width;
 
-canvas.addEventListener('mousemove', e => {
-  const rect = canvas.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const width = canvas.width;
-  const hoverCue = markerPositions.find(m => Math.abs(m.timeRatio*width - x) < 5);
-  if(hoverCue){
-    cueBanner.textContent = hoverCue.name || '(unnamed)';
-    cueBanner.style.background = hoverCue.color;
-    cueBanner.style.display = 'block';
-    cueBanner.style.left = e.pageX+'px';
-    cueBanner.style.top = (rect.top + window.scrollY - 30)+'px';
-    cueBanner.style.transition = 'all 0.2s ease';
-  } else {
-    cueBanner.style.display = 'none';
-  }
+    const hoveredCue = pages[currentPage].cues.find(cue=>{
+        const [m,sms] = cue.time.split(':');
+        const [s,ms] = sms.split('.');
+        const tSec = parseInt(m)*60 + parseInt(s) + parseInt(ms)/1000;
+        const cx = (tSec / audioEl.duration) * w;
+        return Math.abs(cx - x) < 4;
+    });
+
+    if(hoveredCue){
+        cueBanner.style.display = 'block';
+        cueBanner.style.left = e.pageX + 'px';
+        cueBanner.style.top = e.pageY - 20 + 'px';
+        cueBanner.textContent = hoveredCue.name || '(unnamed)';
+        cueBanner.style.background = hoveredCue.color;
+    } else {
+        cueBanner.style.display = 'none';
+    }
 });
 
-canvas.addEventListener('mouseout', ()=>{ cueBanner.style.display = 'none'; });
+canvas.addEventListener('mouseout', ()=> cueBanner.style.display='none');
