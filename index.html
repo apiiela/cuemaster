@@ -8,7 +8,7 @@
     :root{--bg:#0b0c10;--panel:#0f1117;--muted:#9aa3af;--text:#e6e8eb;--accent:#5b8cff;--ok:#22c55e}
     *{box-sizing:border-box}
     html,body{height:100%;margin:0;font-family:Inter, system-ui, -apple-system, 'Segoe UI', Roboto, Arial;color:var(--text);background:linear-gradient(180deg,#07070a,#0b0c10)}
-    .app{max-width:1100px;margin:28px auto;padding:20px}
+    .app{max-width:1100px;margin:28px auto;padding:20px;position:relative}
     header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
     h1{margin:0;font-size:1.2rem}
     .lead{margin:6px 0 0;color:var(--muted)}
@@ -17,7 +17,7 @@
     button{background:transparent;border:1px solid #222;padding:8px 10px;border-radius:8px;color:var(--text);cursor:pointer}
     button.primary{background:var(--accent);border:none;color:#051025}
     input[type=file]{display:none}
-    .drop{border:2px dashed rgba(255,255,255,0.03);padding:18px;border-radius:10px;text-align:center;color:var(--muted);margin-bottom:12px}
+    .drop{border:2px dashed rgba(255,255,255,0.03);padding:18px;border-radius:10px;text-align:center;color:var(--muted);margin-bottom:12px;cursor:pointer}
     canvas{width:100%;height:140px;border-radius:8px;background:#051019;display:block;cursor:pointer}
     .time{font-variant-numeric:tabular-nums;color:var(--muted);min-width:110px;text-align:center;padding:6px;border-radius:8px;font-size:1.5rem;font-weight:bold}
     .cue-list{margin-top:12px;border-radius:10px;overflow:auto}
@@ -32,7 +32,8 @@
     .col{flex:1}
     .notes{width:100%;min-width:120px}
     .flash{color:var(--ok)}
-    .cue-banner{position:absolute;background:#111;padding:4px 8px;border-radius:6px;font-size:0.8rem;white-space:nowrap;transform:translateY(-100%);pointer-events:none}
+    .cue-banner{position:absolute;padding:6px 10px;border-radius:6px;font-size:0.9rem;white-space:nowrap;pointer-events:none;display:none;color:#fff;opacity:0;transform:translate(-50%,-120%) scale(0.95);transition:opacity 0.2s ease, transform 0.2s ease;}
+    .cue-banner.show{display:block;opacity:1;transform:translate(-50%,-140%) scale(1);}
     .playlist{margin:12px 0;display:flex;gap:6px;flex-wrap:wrap}
     .page-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:6px;border:1px solid #333;cursor:pointer;position:relative}
     .page-label{flex:1;}
@@ -56,26 +57,27 @@
     <button id="newPageBtn">＋ New Page</button>
 
     <div class="panel">
-      <div class="drop" id="dropZone">Drop audio file here or click to select<input type="file" id="fileInput" accept="audio/*" /></div>
+      <label class="drop" id="dropZone">Drop audio file here or click to select<input type="file" id="fileInput" accept="audio/*" /></label>
       <div class="controls">
         <button id="playBtn">▶︎</button>
         <button id="pauseBtn">❚❚</button>
         <button id="stopBtn">⏹ Restart</button>
+        <button id="addCueBtn">＋ Cue</button>
+        <button id="saveBtn">💾 Save</button>
+        <button id="openBtn">📂 Open</button>
         <span class="time" id="timeDisplay">00:00.000</span>
       </div>
       <canvas id="waveform"></canvas>
-      <div class="controls">
-        <button id="addCueBtn">＋ Cue</button>
-      </div>
       <div class="cue-list">
         <table>
           <thead>
-            <tr><th>Time</th><th>Note</th><th>Actions</th></tr>
+            <tr><th>Time</th><th>Name</th><th>Note</th><th>Colour</th><th>Actions</th></tr>
           </thead>
           <tbody id="cueTableBody"></tbody>
         </table>
       </div>
     </div>
+    <div class="cue-banner" id="cueBanner"></div>
   </div>
 
   <audio id="audioEl" crossorigin="anonymous" hidden></audio>
@@ -87,9 +89,16 @@
     const playBtn=document.getElementById('playBtn');
     const pauseBtn=document.getElementById('pauseBtn');
     const stopBtn=document.getElementById('stopBtn');
+    const addCueBtn=document.getElementById('addCueBtn');
+    const saveBtn=document.getElementById('saveBtn');
+    const openBtn=document.getElementById('openBtn');
+    const fileInput=document.getElementById('fileInput');
+    const dropZone=document.getElementById('dropZone');
     const timeDisplay=document.getElementById('timeDisplay');
-    const waveform=document.getElementById('waveform');
     const cueTableBody=document.getElementById('cueTableBody');
+    const cueBanner=document.getElementById('cueBanner');
+    const canvas=document.getElementById('waveform');
+    const ctx=canvas.getContext('2d');
 
     let pages=[];let currentPage=0;
 
@@ -113,7 +122,7 @@
         label.textContent=p.name;
         label.className='page-label';
 
-        btn.addEventListener('click',()=>{currentPage=i;loadPage();});
+        btn.addEventListener('click',()=>{currentPage=i;loadPage();drawWaveform();});
 
         label.addEventListener('dblclick',(ev)=>{
           ev.stopPropagation();
@@ -138,6 +147,7 @@
             if(currentPage>=pages.length)currentPage=Math.max(0,pages.length-1);
             renderPages();
             loadPage();
+            drawWaveform();
           }
         });
 
@@ -148,21 +158,91 @@
     }
 
     function loadPage(){
-      console.log("Loaded page",pages[currentPage]?.name);
       cueTableBody.innerHTML='';
       if(!pages[currentPage])return;
       pages[currentPage].cues.forEach((cue,j)=>{
         const tr=document.createElement('tr');
-        tr.innerHTML='<td>'+cue.time+'</td><td>'+cue.note+'</td><td><button data-i="'+j+'">Delete</button></td>';
-        tr.querySelector('button').addEventListener('click',()=>{
+        tr.innerHTML=`<td>${cue.time}</td>
+                      <td><input value="${cue.name||''}" data-field="name" data-i="${j}"/></td>
+                      <td><input class="notes" value="${cue.note||''}" data-field="note" data-i="${j}"/></td>
+                      <td><input type="color" value="${cue.color||'#5b8cff'}" data-field="color" data-i="${j}"/></td>
+                      <td><button data-i="${j}" class="del">Delete</button></td>`;
+        tr.querySelectorAll('input').forEach(inp=>{
+          inp.addEventListener('input',()=>{
+            const field=inp.dataset.field;
+            pages[currentPage].cues[j][field]=inp.value;
+            drawWaveform();
+          });
+        });
+        tr.querySelector('.del').addEventListener('click',()=>{
           pages[currentPage].cues.splice(j,1);
           loadPage();
+          drawWaveform();
         });
         cueTableBody.appendChild(tr);
       });
     }
 
-    // Basic audio controls
+    // Add Cue
+    addCueBtn.addEventListener('click',()=>{
+      if(!pages[currentPage])return;
+      const t=audioEl.currentTime||0;
+      const ms=(t%1).toFixed(3).substring(2);
+      const s=('0'+Math.floor(t%60)).slice(-2);
+      const m=('0'+Math.floor(t/60)).slice(-2);
+      const timeStr=`${m}:${s}.${ms}`;
+      pages[currentPage].cues.push({time:timeStr,name:'',note:'',color:'#5b8cff'});
+      loadPage();
+      drawWaveform();
+    });
+
+    // File import
+    dropZone.addEventListener('click',()=>fileInput.click());
+    dropZone.addEventListener('dragover',(e)=>{e.preventDefault();});
+    dropZone.addEventListener('drop',(e)=>{
+      e.preventDefault();
+      if(e.dataTransfer.files.length) loadFile(e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener('change',()=>{
+      if(fileInput.files.length) loadFile(fileInput.files[0]);
+    });
+
+    function loadFile(file){
+      const url=URL.createObjectURL(file);
+      audioEl.src=url;
+      audioEl.load();
+    }
+
+    // Save/Load
+    saveBtn.addEventListener('click',()=>{
+      const blob=new Blob([JSON.stringify(pages)],{type:'application/json'});
+      const a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download='cuepoints.json';
+      a.click();
+    });
+
+    openBtn.addEventListener('click',()=>{
+      const inp=document.createElement('input');
+      inp.type='file';
+      inp.accept='.json';
+      inp.addEventListener('change',()=>{
+        if(inp.files.length){
+          const fr=new FileReader();
+          fr.onload=()=>{
+            pages=JSON.parse(fr.result);
+            currentPage=0;
+            renderPages();
+            loadPage();
+            drawWaveform();
+          };
+          fr.readAsText(inp.files[0]);
+        }
+      });
+      inp.click();
+    });
+
+    // Audio controls
     playBtn.addEventListener('click',()=>audioEl.play());
     pauseBtn.addEventListener('click',()=>audioEl.pause());
     stopBtn.addEventListener('click',()=>{if(isFinite(audioEl.duration)){audioEl.currentTime=0;}audioEl.pause();});
@@ -173,10 +253,70 @@
       const s=('0'+Math.floor(t%60)).slice(-2);
       const m=('0'+Math.floor(t/60)).slice(-2);
       timeDisplay.textContent=`${m}:${s}.${ms}`;
+
+      if(pages[currentPage]){
+        pages[currentPage].cues.forEach(cue=>{
+          const [cm,cs]=cue.time.split(':');
+          const [sec,millis]=cs.split('.');
+          const cueTime=parseInt(cm)*60+parseInt(sec)+parseInt(millis)/1000;
+          if(Math.abs(cueTime-t)<0.1){
+            timeDisplay.classList.add('flash');
+            setTimeout(()=>timeDisplay.classList.remove('flash'),200);
+          }
+        });
+      }
     });
 
-    // Initialize
+    // Draw waveform markers
+    function drawWaveform(){
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      ctx.fillStyle='#051019';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+
+      if(!pages[currentPage]||!isFinite(audioEl.duration)) return;
+      pages[currentPage].cues.forEach(cue=>{
+        const [cm,cs]=cue.time.split(':');
+        const [sec,millis]=cs.split('.');
+        const cueTime=parseInt(cm)*60+parseInt(sec)+parseInt(millis)/1000;
+        const x=(cueTime/audioEl.duration)*canvas.width;
+        ctx.fillStyle=cue.color||'#5b8cff';
+        ctx.fillRect(x-2,0,4,canvas.height);
+      });
+    }
+
+    // Hover detection on markers
+    canvas.addEventListener('mousemove',(e)=>{
+      if(!pages[currentPage]||!isFinite(audioEl.duration)) return;
+      const rect=canvas.getBoundingClientRect();
+      const x=e.clientX-rect.left;
+      const cues=pages[currentPage].cues;
+      let found=null;
+      cues.forEach(cue=>{
+        const [cm,cs]=cue.time.split(':');
+        const [sec,millis]=cs.split('.');
+        const cueTime=parseInt(cm)*60+parseInt(sec)+parseInt(millis)/1000;
+        const cx=(cueTime/audioEl.duration)*canvas.width;
+        if(Math.abs(x-cx)<5) found={cue,cx};
+      });
+
+      if(found){
+        cueBanner.textContent=found.cue.name||'(unnamed)';
+        cueBanner.style.background=found.cue.color;
+        cueBanner.style.left=(rect.left+found.cx)+'px';
+        cueBanner.style.top=(rect.top)+'px';
+        cueBanner.classList.add('show');
+      } else {
+        cueBanner.classList.remove('show');
+      }
+    });
+
+    canvas.addEventListener('mouseleave',()=>{
+      cueBanner.classList.remove('show');
+    });
+
+    // Init
     addPage("Page 1");
+    audioEl.addEventListener('loadedmetadata',drawWaveform);
   </script>
 </body>
 </html>
