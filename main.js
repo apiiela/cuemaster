@@ -1,7 +1,7 @@
-// Cuepoints Main.js — Full Version 1.2
-// Handles pages, cues, audio import, waveform, markers, timecode, and controls
+// Cuepoints Main.js — Full Version 1.4
+// Updated waveform drawing for sharp gray waveform, clean markers, and animated banners
 
-console.log('Cuepoints Module Version 1.2');
+console.log('Cuepoints Module Version 1.4');
 
 // DOM Elements
 const playlistEl = document.getElementById('playlist');
@@ -26,12 +26,10 @@ let pages = [];
 let currentPage = 0;
 let audioBuffer = null;
 let audioContext = new (window.AudioContext || window.webkitAudioContext)();
-let sourceNode = null;
-let animationFrame = null;
 
 // --- Pages ---
 function addPage(name = 'Page', color = '#333') {
-    pages.push({ name, color, cues: [] });
+    pages.push({ name, color, cues: [], audioFile: null });
     currentPage = pages.length - 1;
     renderPages();
     loadPage();
@@ -88,6 +86,8 @@ function renderPages() {
 function loadPage() {
     cueTableBody.innerHTML = '';
     if (!pages[currentPage]) return;
+    if (pages[currentPage].audioFile) loadAudioFile(pages[currentPage].audioFile);
+
     pages[currentPage].cues.forEach((cue, j) => {
         const tr = document.createElement('tr');
         tr.innerHTML = `<td>${cue.time}</td>
@@ -120,20 +120,23 @@ function loadAudioFile(file) {
         drawWaveform();
         audioEl.src = URL.createObjectURL(file);
         audioEl.load();
+        pages[currentPage].audioFile = file;
     };
     reader.readAsArrayBuffer(file);
 }
 
+// --- Drop Zone ---
 dropZone.addEventListener('click', () => fileInput.click());
 dropZone.addEventListener('dragover', e => e.preventDefault());
 dropZone.addEventListener('drop', e => { e.preventDefault(); if (e.dataTransfer.files.length) loadAudioFile(e.dataTransfer.files[0]); });
 fileInput.addEventListener('change', () => { if (fileInput.files.length) loadAudioFile(fileInput.files[0]); });
 
 // --- Audio Controls ---
-playBtn.addEventListener('click', () => { audioEl.play(); });
-pauseBtn.addEventListener('click', () => { audioEl.pause(); });
+playBtn.addEventListener('click', () => audioEl.play());
+pauseBtn.addEventListener('click', () => audioEl.pause());
 stopBtn.addEventListener('click', () => { audioEl.pause(); audioEl.currentTime = 0; });
 
+// --- Add Cue ---
 addCueBtn.addEventListener('click', () => {
     if (!pages[currentPage]) return;
     const t = audioEl.currentTime || 0;
@@ -183,7 +186,6 @@ audioEl.addEventListener('timeupdate', () => {
     timeDisplay.textContent = `${m}:${s}.${ms}`;
     drawWaveform();
 
-    // Flash cues
     if (pages[currentPage]) {
         pages[currentPage].cues.forEach(cue => {
             if (Math.abs(cue.position - t) < 0.1) {
@@ -198,41 +200,44 @@ audioEl.addEventListener('timeupdate', () => {
 function drawWaveform() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     if (!audioBuffer) return;
-    const { length, numberOfChannels, duration } = audioBuffer;
+    const { length, duration } = audioBuffer;
     const channelData = audioBuffer.getChannelData(0);
     const width = canvas.width;
     const height = canvas.height;
-    const step = Math.ceil(channelData.length / width);
+    const step = Math.floor(channelData.length / width);
 
-    // Draw waveform
-    ctx.fillStyle = '#051019';
+    // Background
+    ctx.fillStyle = '#101010';
     ctx.fillRect(0, 0, width, height);
-    ctx.strokeStyle = '#5b8cff';
+
+    // Waveform
+    ctx.strokeStyle = '#ccc';
+    ctx.lineWidth = 1;
     ctx.beginPath();
     for (let i = 0; i < width; i++) {
         const min = channelData[i * step];
-        const y = (1 - min) * height / 2;
+        const y = ((1 - min) / 2) * height;
         ctx.lineTo(i, y);
     }
     ctx.stroke();
 
-    // Draw cue markers
+    // Cue markers
     if (pages[currentPage]) {
         pages[currentPage].cues.forEach(cue => {
             const x = (cue.position / duration) * width;
             ctx.strokeStyle = cue.color;
+            ctx.lineWidth = 2;
             ctx.beginPath();
             ctx.moveTo(x, 0);
             ctx.lineTo(x, height);
-            ctx.lineWidth = 1.5;
             ctx.stroke();
         });
     }
 
-    // Draw current playback line
+    // Playback line
     if (!isNaN(audioEl.currentTime)) {
         const x = (audioEl.currentTime / duration) * width;
-        ctx.strokeStyle = '#22c55e';
+        ctx.strokeStyle = '#fff';
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(x, 0);
@@ -266,7 +271,8 @@ canvas.addEventListener('mousemove', e => {
             cueBanner.style.display = 'block';
             cueBanner.style.left = e.pageX + 'px';
             cueBanner.style.top = e.pageY - 30 + 'px';
-            cueBanner.style.transition = 'all 0.2s ease';
+            cueBanner.style.transition = 'transform 0.2s ease';
+            cueBanner.style.transform = 'translateX(-50%) translateY(-10px)';
             found = true;
         }
     });
