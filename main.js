@@ -1,4 +1,5 @@
-// main.js
+// main.js — Version 1.1
+console.log("Cuepoints Module Version 1.1");
 
 const audioEl = document.getElementById('audioEl');
 const fileInput = document.getElementById('fileInput');
@@ -9,8 +10,13 @@ const stopBtn = document.getElementById('stopBtn');
 const saveBtn = document.getElementById('saveBtn');
 const openBtn = document.getElementById('openBtn');
 const timeDisplay = document.getElementById('timeDisplay');
+const waveformCanvas = document.getElementById('waveform');
+const ctx = waveformCanvas.getContext('2d');
+const cueBanner = document.getElementById('cueBanner');
 
 let currentAudioFile = null;
+let audioBuffer = null;
+let audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
 // ---------- AUDIO IMPORT ----------
 function loadAudioFile(file) {
@@ -19,7 +25,15 @@ function loadAudioFile(file) {
   const url = URL.createObjectURL(file);
   audioEl.src = url;
   audioEl.load();
-  audioEl.play(); // optional auto-play
+
+  // Decode for waveform
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const arrayBuffer = e.target.result;
+    audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    drawWaveform();
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 // File input
@@ -65,6 +79,8 @@ audioEl.addEventListener('timeupdate', () => {
       }
     });
   }
+
+  drawWaveform(); // update marker position
 });
 
 // ---------- SAVE / LOAD ----------
@@ -103,3 +119,77 @@ openBtn.addEventListener('click', () => {
   });
   inp.click();
 });
+
+// ---------- WAVEFORM DRAWING ----------
+function drawWaveform() {
+  if (!audioBuffer) return;
+  const width = waveformCanvas.width = waveformCanvas.clientWidth;
+  const height = waveformCanvas.height = waveformCanvas.clientHeight;
+  ctx.clearRect(0, 0, width, height);
+
+  const channelData = audioBuffer.getChannelData(0);
+  const step = Math.ceil(channelData.length / width);
+  ctx.fillStyle = '#333';
+  for (let i = 0; i < width; i++) {
+    const min = Math.min(...channelData.slice(i*step, (i+1)*step));
+    const max = Math.max(...channelData.slice(i*step, (i+1)*step));
+    ctx.fillRect(i, (1+min)*0.5*height, 1, Math.max(1,(max-min)*0.5*height));
+  }
+
+  // Draw cue markers
+  if (pages[currentPage]) {
+    pages[currentPage].cues.forEach(cue => {
+      const [cm, cs] = cue.time.split(':');
+      const [sec, millis] = cs.split('.');
+      const cueTime = parseInt(cm)*60 + parseInt(sec) + parseInt(millis)/1000;
+      const x = (cueTime/audioEl.duration) * width;
+      ctx.fillStyle = cue.color || '#5b8cff';
+      ctx.fillRect(x, 0, 2, height);
+    });
+  }
+
+  // Draw current playhead
+  if (audioEl.duration) {
+    const x = (audioEl.currentTime / audioEl.duration) * width;
+    ctx.strokeStyle = '#fff';
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+    ctx.stroke();
+  }
+}
+
+// ---------- HOVER CUE BANNERS ----------
+waveformCanvas.addEventListener('mousemove', e => {
+  if (!pages[currentPage] || !audioEl.duration) return;
+  const rect = waveformCanvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const width = rect.width;
+
+  // Find nearest cue
+  const cues = pages[currentPage].cues;
+  let nearest = null;
+  let dist = Infinity;
+  cues.forEach(cue => {
+    const [cm, cs] = cue.time.split(':');
+    const [sec, millis] = cs.split('.');
+    const cueTime = parseInt(cm)*60 + parseInt(sec) + parseInt(millis)/1000;
+    const cx = (cueTime / audioEl.duration) * width;
+    if (Math.abs(cx - x) < dist && Math.abs(cx - x) < 10) { // 10px threshold
+      nearest = cue;
+      dist = Math.abs(cx - x);
+    }
+  });
+
+  if (nearest) {
+    cueBanner.style.display = 'block';
+    cueBanner.style.left = e.pageX + 'px';
+    cueBanner.style.top = (rect.top + window.scrollY - 30) + 'px';
+    cueBanner.textContent = nearest.name || '(unnamed)';
+    cueBanner.style.background = nearest.color || '#5b8cff';
+  } else {
+    cueBanner.style.display = 'none';
+  }
+});
+
+waveformCanvas.addEventListener('mouseout', () => cueBanner.style.display = 'none');
