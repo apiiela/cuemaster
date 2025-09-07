@@ -13,13 +13,13 @@
     h1{margin:0;font-size:1.2rem}
     .lead{margin:6px 0 0;color:var(--muted)}
     .panel{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(0,0,0,0.03));border:1px solid rgba(255,255,255,0.03);padding:14px;border-radius:12px}
-    .controls{display:flex;gap:8px;align-items:center;margin-bottom:12px}
+    .controls{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
     button{background:transparent;border:1px solid #222;padding:8px 10px;border-radius:8px;color:var(--text);cursor:pointer}
     button.primary{background:var(--accent);border:none;color:#051025}
     input[type=file]{display:none}
     .drop{border:2px dashed rgba(255,255,255,0.03);padding:18px;border-radius:10px;text-align:center;color:var(--muted);margin-bottom:12px}
-    canvas{width:100%;height:140px;border-radius:8px;background:#051019;display:block}
-    .time{font-variant-numeric:tabular-nums;color:var(--muted);min-width:90px;text-align:center;padding:6px;border-radius:8px}
+    canvas{width:100%;height:140px;border-radius:8px;background:#051019;display:block;cursor:pointer}
+    .time{font-variant-numeric:tabular-nums;color:var(--muted);min-width:110px;text-align:center;padding:6px;border-radius:8px;font-size:1.5rem;font-weight:bold}
     .cue-list{margin-top:12px;border-radius:10px;overflow:auto}
     table{width:100%;border-collapse:collapse}
     th,td{padding:8px 10px;text-align:left;border-bottom:1px solid rgba(255,255,255,0.02)}
@@ -31,7 +31,11 @@
     .cols{display:flex;gap:12px}
     .col{flex:1}
     .notes{width:100%;min-width:120px}
-    .flash{background:linear-gradient(90deg,#eaffea,#eaffea);color:#064e2f}
+    .flash{color:var(--ok)}
+    .cue-banner{position:absolute;background:#111;padding:4px 8px;border-radius:6px;font-size:0.8rem;white-space:nowrap;transform:translateY(-100%);pointer-events:none}
+    .playlist{margin:12px 0;display:flex;gap:6px;flex-wrap:wrap}
+    .page-btn{padding:6px 10px;border-radius:6px;border:1px solid #333;cursor:pointer;position:relative}
+    .rename-input{position:absolute;top:0;left:0;width:100%;height:100%;border:none;border-radius:6px;padding:4px;text-align:center;font-size:0.9rem}
   </style>
 </head>
 <body>
@@ -39,27 +43,36 @@
     <header>
       <div>
         <h1>Cuepoints — Full App</h1>
-        <div class="lead">Import audio, add and edit cue points with notes, save/load sessions. Timecode flashes green when a cue triggers.</div>
+        <div class="lead">Import audio, add/edit cue points, save/load sessions. Timecode flashes green when a cue triggers.</div>
       </div>
       <div style="text-align:right">
-        <div class="small">Shortcuts: <span class="kbd">Space</span>=Play, <span class="kbd">C</span>=Add cue, <span class="kbd">←/→</span>=Seek 5s</div>
+        <div class="small">Shortcuts: <span class="kbd">Space</span>=Play, <span class="kbd">C</span>=Add cue, <span class="kbd">←/→</span>=Seek 5s, <span class="kbd">[</span>/<span class="kbd">]</span>=Frame step</div>
       </div>
     </header>
+
+    <div class="playlist" id="playlist"></div>
+    <button id="newPageBtn">＋ New Page</button>
 
     <div class="panel">
       <div class="controls">
         <label for="fileInputAudio"><button>Import audio</button></label>
         <input id="fileInputAudio" type="file" accept="audio/*">
         <button id="playBtn">Play ▶</button>
+        <button id="restartBtn">⟲ Restart</button>
         <button id="addCueBtn">＋ Cue</button>
         <button id="jumpPrev">◀ Prev</button>
         <button id="jumpNext">Next ▶</button>
+        <button id="stepBack">[ Frame -</button>
+        <button id="stepFwd">Frame + ]</button>
         <div style="flex:1"></div>
         <div id="timeDisplay" class="time">00:00.0</div>
       </div>
 
       <div class="drop" id="dropZone">Drop audio file here or use Import button</div>
-      <canvas id="waveCanvas" width="1200" height="200" aria-label="Waveform"></canvas>
+      <div style="position:relative">
+        <canvas id="waveCanvas" width="1200" height="200" aria-label="Waveform"></canvas>
+        <div id="cueBanner" class="cue-banner" style="display:none"></div>
+      </div>
 
       <div class="cols" style="margin-top:12px">
         <div class="col">
@@ -82,76 +95,238 @@
             <button id="saveLocal">Save locally</button>
             <button id="loadLocal">Load saved</button>
             <button id="clearCues">Clear cues</button>
-            <div class="small muted">Loaded session replaces current cues. Use notes field to add rehearsal/design notes. Timecode flashes green for 400ms when a cue is hit.</div>
           </div>
         </div>
       </div>
-
     </div>
-
-    <div class="small muted" style="margin-top:10px">This page is a standalone HTML app — you can save it and open locally. Works fully in-browser.</div>
   </div>
 
   <audio id="audioEl" crossorigin="anonymous" hidden></audio>
 
   <script>
-    // Elements
     const fileInputAudio = document.getElementById('fileInputAudio');
-    const fileInput = document.getElementById('fileInput');
-    const openBtn = document.getElementById('openBtn');
-    const downloadBtn = document.getElementById('downloadBtn');
-    const exportCSV = document.getElementById('exportCSV');
-    const saveLocal = document.getElementById('saveLocal');
-    const loadLocal = document.getElementById('loadLocal');
-    const clearCuesBtn = document.getElementById('clearCues');
-    const playBtn = document.getElementById('playBtn');
-    const addCueBtn = document.getElementById('addCueBtn');
-    const jumpPrev = document.getElementById('jumpPrev');
-    const jumpNext = document.getElementById('jumpNext');
-    const timeDisplay = document.getElementById('timeDisplay');
-    const cueTableBody = document.querySelector('#cueTable tbody');
-    const dropZone = document.getElementById('dropZone');
     const audioEl = document.getElementById('audioEl');
     const waveCanvas = document.getElementById('waveCanvas');
     const ctx = waveCanvas.getContext('2d');
+    const playBtn = document.getElementById('playBtn');
+    const restartBtn = document.getElementById('restartBtn');
+    const stepBack = document.getElementById('stepBack');
+    const stepFwd = document.getElementById('stepFwd');
+    const cueBanner = document.getElementById('cueBanner');
+    const playlistEl = document.getElementById('playlist');
+    const newPageBtn = document.getElementById('newPageBtn');
+    const timeDisplay = document.getElementById('timeDisplay');
+    const cueTableBody = document.querySelector('#cueTable tbody');
 
-    let audioBuffer = null;
-    let cues = []; // {id, time, name, notes, color, triggeredAt}
-    let raf = null;
+    let audioCtx = null;
+    let audioBuffer = null; // currently loaded audioBuffer
+    let cues = [];
+    let raf;
+    let pages = [];
+    let currentPage = 0;
+    let isSeeking = false; // for drag
 
-    function formatTime(t){ if(!isFinite(t)) t = 0; const m=Math.floor(t/60); const s=Math.floor(t%60); const d=Math.floor((t*10)%10); return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${d}` }
+    function formatTime(t){
+      if(!Number.isFinite(t)) t = 0;
+      const m=Math.floor(t/60); const s=Math.floor(t%60); const d=Math.floor((t*100)%100);
+      return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(d).padStart(2,'0')}`;
+    }
 
-    // Draw waveform once audioBuffer loaded
+    // Get the best available duration (audioBuffer preferred)
+    function getDuration(){
+      if(audioBuffer && Number.isFinite(audioBuffer.duration)) return audioBuffer.duration;
+      if(Number.isFinite(audioEl.duration)) return audioEl.duration;
+      return NaN;
+    }
+
+    // Safely set audio currentTime only when we have a finite duration
+    function safeSetCurrentTime(t){
+      const dur = getDuration();
+      if(!Number.isFinite(dur)) return; // nothing to seek to yet
+      const clamped = Math.max(0, Math.min(dur, Number.isFinite(t) ? t : 0));
+      try{
+        audioEl.currentTime = clamped;
+      }catch(err){
+        // Defensive: if browser still complains, just ignore and log.
+        console.warn('safeSetCurrentTime failed', err, clamped);
+      }
+    }
+
+    // Handle audio file import and attach it to the current page
+    async function handleAudioFile(file){
+      if(!file) return;
+      if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+      const array = await file.arrayBuffer();
+      // decodeAudioData can throw; wrap for safety
+      try{
+        const decoded = await audioCtx.decodeAudioData(array.slice(0));
+        audioBuffer = decoded;
+      }catch(e){
+        console.error('Failed to decode audio', e);
+        alert('Failed to decode audio file.');
+        return;
+      }
+
+      // create url for playback element
+      const url = URL.createObjectURL(new Blob([array], {type:file.type || 'audio/mpeg'}));
+      audioEl.src = url;
+      // store on current page
+      const page = pages[currentPage] || null;
+      if(page){
+        page.audioFileName = file.name;
+        page.audioUrl = url;
+        page.audioBuffer = audioBuffer;
+      }
+
+      // if audio element metadata isn't ready immediately, loadedmetadata will fire
+      audioEl.addEventListener('loadedmetadata', ()=>{
+        drawWaveform(audioBuffer);
+        renderCues();
+      }, {once:true});
+
+      // draw straight away (decodeAudioData gives us buffer)
+      drawWaveform(audioBuffer);
+      renderCues();
+    }
+
     function drawWaveform(buffer){
+      if(!buffer) {
+        // draw empty placeholder
+        const width = waveCanvas.width = Math.floor(waveCanvas.clientWidth * devicePixelRatio);
+        const height = waveCanvas.height = 140 * devicePixelRatio;
+        ctx.clearRect(0,0,width,height);
+        ctx.fillStyle='#06121a'; ctx.fillRect(0,0,width,height);
+        ctx.fillStyle='#27445b'; ctx.fillRect(0,height/2,width,2);
+        return;
+      }
+
       const width = waveCanvas.width = Math.floor(waveCanvas.clientWidth * devicePixelRatio);
       const height = waveCanvas.height = 140 * devicePixelRatio;
       ctx.clearRect(0,0,width,height);
-      if(!buffer) return;
       const data = buffer.getChannelData(0);
-      const step = Math.ceil(data.length / width);
+      const step = Math.max(1, Math.ceil(data.length/width));
       ctx.fillStyle = '#06121a'; ctx.fillRect(0,0,width,height);
       ctx.fillStyle = '#27445b';
       for(let i=0;i<width;i++){
-        const start = i*step; let min=1,max=-1;
-        for(let j=0;j<step && start+j < data.length;j++){ const v=data[start+j]; if(v<min)min=v; if(v>max)max=v }
-        const y1 = (1+min)/2*height; const y2 = (1+max)/2*height; ctx.fillRect(i, height - y2, 1, y2 - y1 || 1);
+        let min=1,max=-1;
+        const start = i*step;
+        for(let j=0;j<step && (start+j) < data.length;j++){ const v=data[start+j]; if(v<min)min=v; if(v>max)max=v; }
+        const y1=(1+min)/2*height; const y2=(1+max)/2*height;
+        ctx.fillRect(i,height-y2,1,Math.max(1,y2-y1));
       }
     }
 
     function drawOverlay(){
       if(!audioBuffer) return;
-      const width = waveCanvas.width; const height = waveCanvas.height;
-      // redraw waveform lightly
       drawWaveform(audioBuffer);
-      // draw cues
+      const width = waveCanvas.width, height = waveCanvas.height;
       cues.forEach(c=>{
-        const x = (c.time / audioBuffer.duration) * width; ctx.fillStyle = c.color || '#7c5bff'; ctx.fillRect(Math.round(x)-1, 0, 3, height);
+        const x = (Number(c.time) / audioBuffer.duration) * width;
+        ctx.fillStyle = c.color || '#7c5bff';
+        ctx.fillRect(Math.round(x)-1, 0, 3, height);
       });
-      // playhead
-      if(!isNaN(audioEl.currentTime) && audioBuffer.duration){ const px = (audioEl.currentTime / audioBuffer.duration) * width; ctx.fillStyle='rgba(255,255,255,0.9)'; ctx.fillRect(Math.round(px)-1,0,2,height); }
+
+      if(Number.isFinite(audioEl.currentTime) && Number.isFinite(audioBuffer.duration)){
+        const px = (audioEl.currentTime / audioBuffer.duration) * width;
+        ctx.fillStyle = 'white';
+        ctx.fillRect(Math.round(px)-1, 0, 2, height);
+      }
     }
 
-    // Render cue table
+    function flashTimecode(){
+      timeDisplay.classList.add('flash');
+      setTimeout(()=>timeDisplay.classList.remove('flash'),400);
+    }
+
+    function onTick(){
+      // only update display if we have a finite currentTime
+      if(Number.isFinite(audioEl.currentTime)){
+        timeDisplay.textContent = formatTime(audioEl.currentTime);
+      } else {
+        timeDisplay.textContent = formatTime(0);
+      }
+      drawOverlay();
+      raf = requestAnimationFrame(onTick);
+    }
+
+    // ------- UI / Controls -------
+    playBtn.addEventListener('click', ()=>{
+      if(audioEl.paused){
+        // try to resume audio context if suspended (user gesture requirement in some browsers)
+        if(audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+        audioEl.play();
+        playBtn.textContent = 'Pause ⏸';
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(onTick);
+      }else{
+        audioEl.pause();
+        playBtn.textContent = 'Play ▶';
+        cancelAnimationFrame(raf);
+      }
+    });
+
+    restartBtn.addEventListener('click', ()=>{ safeSetCurrentTime(0); });
+
+    stepBack.addEventListener('click', ()=>{
+      const now = Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : 0;
+      safeSetCurrentTime(now - (1/60));
+      // optional subtle click for frame accuracy: play a tiny silent buffer — omitted for simplicity
+    });
+    stepFwd.addEventListener('click', ()=>{
+      const now = Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : 0;
+      safeSetCurrentTime(now + (1/60));
+    });
+
+    // Click + drag to seek (uses safeSetCurrentTime to avoid NaN)
+    let isMouseDown = false;
+    waveCanvas.addEventListener('mousedown', e=>{
+      isMouseDown = true;
+      if(!audioBuffer) return;
+      const rect = waveCanvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const target = x * audioBuffer.duration;
+      safeSetCurrentTime(target);
+    });
+    window.addEventListener('mouseup', ()=>{ isMouseDown = false; });
+    waveCanvas.addEventListener('mousemove', e=>{
+      if(!audioBuffer) return;
+      const rect = waveCanvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width;
+      const hoverTime = x * audioBuffer.duration;
+      // show cue banner for nearby cue
+      const hoverCue = cues.find(c => Math.abs(Number(c.time) - hoverTime) < 0.5);
+      if(hoverCue){
+        cueBanner.textContent = hoverCue.name;
+        cueBanner.style.left = Math.max(8, Math.min(rect.width-8, (e.clientX - rect.left))) + 'px';
+        cueBanner.style.top = '0px';
+        cueBanner.style.display = 'block';
+      } else cueBanner.style.display = 'none';
+
+      if(isMouseDown){
+        safeSetCurrentTime(hoverTime);
+      }
+    });
+
+    // also support touch events
+    waveCanvas.addEventListener('touchstart', e=>{ e.preventDefault(); const t=e.touches[0]; waveCanvas.dispatchEvent(new MouseEvent('mousedown', {clientX: t.clientX, clientY: t.clientY})); });
+    waveCanvas.addEventListener('touchmove', e=>{ e.preventDefault(); const t=e.touches[0]; waveCanvas.dispatchEvent(new MouseEvent('mousemove', {clientX: t.clientX, clientY: t.clientY})); });
+    waveCanvas.addEventListener('touchend', e=>{ e.preventDefault(); window.dispatchEvent(new MouseEvent('mouseup')); });
+
+    // File input
+    fileInputAudio.addEventListener('change', e=>{
+      const f = e.target.files && e.target.files[0];
+      if(f) handleAudioFile(f);
+    });
+
+    // drag+drop
+    const dropZone = document.getElementById('dropZone');
+    dropZone.addEventListener('dragover', e=>{ e.preventDefault(); dropZone.style.borderColor='#3b6ee6'; });
+    dropZone.addEventListener('dragleave', e=>{ e.preventDefault(); dropZone.style.borderColor=''; });
+    dropZone.addEventListener('drop', e=>{ e.preventDefault(); dropZone.style.borderColor=''; const f = e.dataTransfer.files && e.dataTransfer.files[0]; if(f) handleAudioFile(f); });
+
+    // ------- Cues table + actions -------
+    function escapeHtml(s){ return String(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
     function renderCues(){
       cueTableBody.innerHTML = '';
       cues.sort((a,b)=>a.time-b.time);
@@ -170,84 +345,23 @@
       drawOverlay();
     }
 
-    function escapeHtml(s){ return String(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-
     function addCueAt(time){
-      const t = Number(time ?? audioEl.currentTime ?? 0);
+      const t = Number.isFinite(time) ? Number(time) : (Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : 0);
       const id = 'c'+Math.random().toString(36).slice(2,9);
-      cues.push({id, time: Math.max(0, t), name: 'New cue', notes:'', color:'#7c5bff', triggeredAt: null});
+      const cue = {id, time: Math.max(0, t), name: 'New cue', notes:'', color:'#7c5bff'};
+      cues.push(cue);
+      // persist to page
+      if(pages[currentPage]) pages[currentPage].cues = cues;
       renderCues();
     }
 
-    // File handling: import audio
-    async function handleAudioFile(file){
-      if(!file) return;
-      const array = await file.arrayBuffer();
-      const ac = new (window.AudioContext || window.webkitAudioContext)();
-      audioBuffer = await ac.decodeAudioData(array.slice(0));
-      const blob = new Blob([array], {type: file.type || 'audio/*'});
-      const url = URL.createObjectURL(blob);
-      audioEl.src = url; audioEl.hidden = false;
-      drawWaveform(audioBuffer);
-      cues = cues || [];
-      renderCues();
-    }
+    document.getElementById('addCueBtn').addEventListener('click', ()=> addCueAt());
 
-    // Playback loop and cue trigger detection
-    let lastCheckTime = 0;
-    function onTick(){
-      if(audioEl.duration && !isNaN(audioEl.currentTime)){
-        timeDisplay.textContent = formatTime(audioEl.currentTime);
-        // check cues between lastCheckTime and now
-        const now = audioEl.currentTime;
-        const windowStart = lastCheckTime; const windowEnd = now;
-        // handle backwards seek
-        if(windowEnd < windowStart){ cues.forEach(c=>c.triggeredAt = null); }
-        cues.forEach(c=>{
-          if(c.triggeredAt) return; // already triggered and not reset
-          if(c.time >= windowStart - 0.02 && c.time <= windowEnd + 0.02){
-            // trigger
-            c.triggeredAt = Date.now();
-            flashTimecode();
-          }
-        });
-        lastCheckTime = now;
-        drawOverlay();
-      }
-      raf = requestAnimationFrame(onTick);
-    }
-
-    function flashTimecode(){
-      timeDisplay.classList.add('flash');
-      setTimeout(()=> timeDisplay.classList.remove('flash'), 400);
-    }
-
-    // Button events
-    fileInputAudio.addEventListener('change', e=> handleAudioFile(e.target.files[0]));
-    dropZone.addEventListener('dragover', e=>{ e.preventDefault(); dropZone.style.borderColor='#3b6ee6'; });
-    dropZone.addEventListener('dragleave', e=>{ e.preventDefault(); dropZone.style.borderColor=''; });
-    dropZone.addEventListener('drop', e=>{ e.preventDefault(); dropZone.style.borderColor=''; handleAudioFile(e.dataTransfer.files[0]); });
-
-    playBtn.addEventListener('click', ()=>{
-      if(audioEl.paused){ audioEl.play(); playBtn.textContent='Pause ⏸'; lastCheckTime = audioEl.currentTime; raf = requestAnimationFrame(onTick); }
-      else { audioEl.pause(); playBtn.textContent='Play ▶'; cancelAnimationFrame(raf); }
-    });
-
-    addCueBtn.addEventListener('click', ()=> addCueAt());
-    window.addEventListener('keydown', e=>{
-      if(e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-      if(e.code === 'Space'){ e.preventDefault(); playBtn.click(); }
-      if(e.key.toLowerCase() === 'c'){ e.preventDefault(); addCueAt(); }
-      if(e.code === 'ArrowLeft'){ e.preventDefault(); audioEl.currentTime = Math.max(0, audioEl.currentTime - 5); }
-      if(e.code === 'ArrowRight'){ e.preventDefault(); audioEl.currentTime = Math.min(audioEl.duration||0, audioEl.currentTime + 5); }
-    });
-
-    // Table delegation
-    cueTableBody.addEventListener('click', e=>{
+    cueTableBody.addEventListener('click', e =>{
       const seek = e.target.closest('button.seek');
       const del = e.target.closest('button.del');
-      if(seek){ audioEl.currentTime = Number(seek.dataset.time); drawOverlay(); }
-      if(del){ const id = del.dataset.id; cues = cues.filter(c=>c.id !== id); renderCues(); }
+      if(seek){ const t = Number(seek.dataset.time); safeSetCurrentTime(t); }
+      if(del){ const id = del.dataset.id; cues = cues.filter(c=>c.id !== id); if(pages[currentPage]) pages[currentPage].cues = cues; renderCues(); }
     });
 
     cueTableBody.addEventListener('input', e=>{
@@ -257,52 +371,116 @@
       if(name){ const id=name.dataset.id; const c = cues.find(x=>x.id===id); if(c) c.name = name.value; }
       if(notes){ const id=notes.dataset.id; const c = cues.find(x=>x.id===id); if(c) c.notes = notes.value; }
       if(col){ const id=col.dataset.id; const c = cues.find(x=>x.id===id); if(c) c.color = col.value; drawOverlay(); }
+      if(pages[currentPage]) pages[currentPage].cues = cues;
     });
 
-    // Jump prev/next cue
-    jumpPrev.addEventListener('click', ()=>{
-      if(!cues.length) return; const t = audioEl.currentTime; const prev = [...cues].filter(c=>c.time < t-0.05).sort((a,b)=>b.time-a.time)[0]; if(prev) audioEl.currentTime = prev.time;
+    // Prev/Next cue
+    document.getElementById('jumpPrev').addEventListener('click', ()=>{
+      if(!cues.length) return; const t = Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : 0; const prev = [...cues].filter(c=>c.time < t-0.05).sort((a,b)=>b.time-a.time)[0]; if(prev) safeSetCurrentTime(prev.time);
     });
-    jumpNext.addEventListener('click', ()=>{
-      if(!cues.length) return; const t = audioEl.currentTime; const next = [...cues].filter(c=>c.time > t+0.05).sort((a,b)=>a.time-b.time)[0]; if(next) audioEl.currentTime = next.time;
+    document.getElementById('jumpNext').addEventListener('click', ()=>{
+      if(!cues.length) return; const t = Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : 0; const next = [...cues].filter(c=>c.time > t+0.05).sort((a,b)=>a.time-b.time)[0]; if(next) safeSetCurrentTime(next.time);
     });
 
-    // Save/Load session (.json)
-    downloadBtn.addEventListener('click', ()=>{
-      const payload = {meta:{savedAt: new Date().toISOString()}, cues};
+    // ------- Playlist pages -------
+    function addPage(name="Page", color="#444"){
+      pages.push({name, color, cues: [], audioUrl: null, audioBuffer: null, audioFileName: null});
+      currentPage = pages.length - 1;
+      renderPages();
+      loadPage();
+    }
+
+    function renderPages(){
+      playlistEl.innerHTML = '';
+      pages.forEach((p,i)=>{
+        const btn = document.createElement('button');
+        btn.textContent = p.name;
+        btn.className = 'page-btn';
+        btn.style.background = p.color || '#333';
+
+        // click to load
+        btn.addEventListener('click', ()=>{ currentPage = i; loadPage(); });
+
+        // double-click to rename
+        btn.addEventListener('dblclick', ()=>{
+          const input = document.createElement('input');
+          input.value = p.name;
+          input.className = 'rename-input';
+          btn.innerHTML = '';
+          btn.appendChild(input);
+          input.focus();
+          input.select();
+          input.addEventListener('blur', ()=>{ p.name = input.value || p.name; renderPages(); });
+          input.addEventListener('keydown', (ev)=>{ if(ev.key === 'Enter'){ p.name = input.value || p.name; renderPages(); } });
+        });
+
+        // small close/remove button (optional)
+        const rm = document.createElement('button'); rm.textContent = '✕'; rm.style.marginLeft = '6px'; rm.style.fontSize='0.8rem'; rm.title='Remove page';
+        rm.addEventListener('click', (ev)=>{ ev.stopPropagation(); if(confirm('Remove page "'+p.name+'"?')){ pages.splice(i,1); if(currentPage >= pages.length) currentPage = Math.max(0,pages.length-1); renderPages(); loadPage(); }});
+
+        btn.appendChild(rm);
+        playlistEl.appendChild(btn);
+      });
+    }
+
+    function loadPage(){
+      const p = pages[currentPage];
+      if(!p) { cues = []; audioBuffer = null; audioEl.src = ''; drawWaveform(null); renderCues(); return; }
+      cues = p.cues || [];
+      // attach any audio we have for this page
+      if(p.audioBuffer){ audioBuffer = p.audioBuffer; }
+      if(p.audioUrl){ audioEl.src = p.audioUrl; }
+      renderPages();
+      renderCues();
+    }
+
+    newPageBtn.addEventListener('click', ()=> addPage('New Page', '#5b8cff'));
+
+    // Auto-advance to next page when playback ends
+    audioEl.addEventListener('ended', ()=>{
+      if(currentPage < pages.length - 1){ currentPage++; loadPage(); // start next automatically
+        // small delay to ensure source set
+        setTimeout(()=>{ audioEl.play().catch(()=>{}); }, 50);
+      }
+    });
+
+    // ------- Session save/load + export (kept simple) -------
+    document.getElementById('downloadBtn').addEventListener('click', ()=>{
+      const payload = {meta:{savedAt:new Date().toISOString()}, pages: pages.map(p=>({name:p.name,color:p.color,cues:p.cues, audioFileName:p.audioFileName}))};
       const blob = new Blob([JSON.stringify(payload,null,2)], {type:'application/json'});
-      const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='cuepoints-session.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+      const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href = url; a.download = 'cuepoints-session.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     });
 
-    openBtn.addEventListener('click', ()=> fileInput.click());
+    // open session
+    const fileInput = document.getElementById('fileInput');
+    document.getElementById('openBtn').addEventListener('click', ()=> fileInput.click());
     fileInput.addEventListener('change', e=>{
-      const f = e.target.files[0]; if(!f) return; const reader = new FileReader(); reader.onload = ev=>{
-        try{ const parsed = JSON.parse(ev.target.result); if(parsed.cues) cues = parsed.cues; else cues = parsed; // support plain array or object
-          // ensure IDs exist
-          cues = cues.map(c=>({ id: c.id || ('c'+Math.random().toString(36).slice(2,9)), time: Number(c.time), name: c.name||'Cue', notes:c.notes||'', color:c.color||'#7c5bff', triggeredAt:null }));
-          renderCues();
-        }catch(err){ alert('Failed to load session: '+err.message); }
+      const f = e.target.files && e.target.files[0]; if(!f) return; const reader = new FileReader(); reader.onload = ev=>{
+        try{ const parsed = JSON.parse(ev.target.result); if(parsed.pages){ pages = parsed.pages.map(p=>({ name:p.name||'Page', color:p.color||'#444', cues:p.cues||[], audioUrl:null, audioBuffer:null, audioFileName:p.audioFileName||null })); currentPage = 0; renderPages(); loadPage(); } else alert('Invalid session file'); } catch(err){ alert('Failed to load session: '+err.message); }
       }; reader.readAsText(f);
     });
 
     // Export CSV
-    exportCSV.addEventListener('click', ()=>{
-      const rows = ['index,time,name,notes,color'];
-      cues.forEach((c,i)=> rows.push([i+1, formatTime(c.time), `"${(c.name||'').replace(/"/g,'""')}\``, `"${(c.notes||'').replace(/"/g,'""')}\``, c.color||''].join(',')));
-      const blob = new Blob([rows.join('\n')], {type:'text/csv'}); const url=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='cuepoints.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    document.getElementById('exportCSV').addEventListener('click', ()=>{
+      const rows = ['page,index,time,name,notes,color'];
+      pages.forEach((p,pi)=>{ (p.cues||[]).forEach((c,ci)=> rows.push([pi+1, ci+1, formatTime(c.time), `"${(c.name||'').replace(/"/g,'""')}"`, `"${(c.notes||'').replace(/"/g,'""')}"`, c.color||''].join(','))); });
+      const blob = new Blob([rows.join('\n')], {type:'text/csv'}); const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='cuepoints.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     });
 
     // Local storage
-    saveLocal.addEventListener('click', ()=>{ localStorage.setItem('cuepoints.session', JSON.stringify({savedAt: Date.now(), cues})); alert('Saved locally'); });
-    loadLocal.addEventListener('click', ()=>{ const d = localStorage.getItem('cuepoints.session'); if(!d) return alert('No saved session'); try{ const parsed = JSON.parse(d); cues = parsed.cues||[]; cues = cues.map(c=>({ id: c.id || ('c'+Math.random().toString(36).slice(2,9)), time: Number(c.time), name:c.name||'Cue', notes:c.notes||'', color:c.color||'#7c5bff', triggeredAt:null })); renderCues(); }catch(e){ alert('Failed to load local'); } });
+    document.getElementById('saveLocal').addEventListener('click', ()=>{ localStorage.setItem('cuepoints.session', JSON.stringify({savedAt: Date.now(), pages: pages.map(p=>({name:p.name,color:p.color,cues:p.cues, audioFileName:p.audioFileName}))})); alert('Saved locally'); });
+    document.getElementById('loadLocal').addEventListener('click', ()=>{ const d = localStorage.getItem('cuepoints.session'); if(!d) return alert('No saved session'); try{ const parsed = JSON.parse(d); if(parsed.pages){ pages = parsed.pages.map(p=>({ name:p.name||'Page', color:p.color||'#444', cues:p.cues||[], audioUrl:null, audioBuffer:null, audioFileName:p.audioFileName||null })); currentPage = 0; renderPages(); loadPage(); } else alert('No pages found'); }catch(e){ alert('Failed to load local'); } });
 
-    clearCuesBtn.addEventListener('click', ()=>{ if(confirm('Clear all cues?')){ cues=[]; renderCues(); } });
+    document.getElementById('clearCues').addEventListener('click', ()=>{ if(confirm('Clear all cues?')){ cues=[]; if(pages[currentPage]) pages[currentPage].cues = cues; renderCues(); } });
 
-    // Resize canvas on window resize
-    let resizeTO; window.addEventListener('resize', ()=>{ clearTimeout(resizeTO); resizeTO=setTimeout(()=>{ if(audioBuffer) drawWaveform(audioBuffer); drawOverlay(); },150); });
+    // initial empty state
+    function init(){
+      addPage('Page 1', '#5b8cff');
+    }
+    init();
 
-    // initial empty waveform
-    (function init(){ ctx.fillStyle='#06121a'; ctx.fillRect(0,0,waveCanvas.width,waveCanvas.height); ctx.fillStyle='#27445b'; ctx.fillRect(0,waveCanvas.height/2,waveCanvas.width,2); renderCues(); })();
+    // expose some functions for debugging in console
+    window._cueApp = { pages, getDuration, safeSetCurrentTime };
   </script>
 </body>
 </html>
